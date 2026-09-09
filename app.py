@@ -2,8 +2,8 @@ from flask import Flask
 import requests, time, pandas as pd, threading
 
 app = Flask(__name__)
-TELEGRAM_TOKEN = "8138518304:AAHu2nJ6EajR6aQ4EKr1R2J4aDqLXv35wi0"
-TELEGRAM_CHAT_ID = "8037290390"
+TELEGRAM_TOKEN = "7586608380:AAGmYdMJ2Uk30MShVRjh8sp0DtpPguaOB2Q"
+TELEGRAM_CHAT_ID = "7484911407"
 
 def send_telegram(msg):
     try:
