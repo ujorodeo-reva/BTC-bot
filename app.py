@@ -7,11 +7,11 @@ TELEGRAM_CHAT_ID = "7484911407"
 
 def send_telegram(msg):
     try:
-        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id": TELEGRAM_CHAT_ID, "text": msg}, timeout=10)
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage", data={"chat_id": TELEGRAM_CHAT_ID, "text": msg})
     except: pass
 
 def get_candles():
-    url = "https://www.okx.com/api/v5/market/candles?instId=BTC-USDT&bar=5m&limit=300"
+    url = "https://www.okx.com/api/v5/market/candles?instId=BTC-USDT&bar=15m&limit=100"
     r = requests.get(url, timeout=10).json()
     data = r['data'][::-1]
     df = pd.DataFrame(data, columns=['time','open','high','low','close','vol','volCcy','volCcyQuote','confirm'])
@@ -21,47 +21,38 @@ def get_candles():
     delta = df['close'].diff()
     gain = delta.where(delta > 0, 0).rolling(14).mean()
     loss = -delta.where(delta < 0, 0).rolling(14).mean()
-    df['RSI'] = 100 - (100 / (1 + gain/loss))
+    rs = gain/loss
+    df['RSI'] = 100 - (100/(1+rs))
     return df
 
-def bot_loop():
-    position = None
-    entry_price = 0
-    last_heartbeat = 0
-    send_telegram("🚀 RENDER 24/7 BOT LIVE! EMA 9/21 + 30min Heartbeat. Will never sleep ✅")
+def check_trend():
+    df = get_candles()
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+    price = last['close']
+    
+    # BUY/SELL Logic
+    if prev['EMA9'] < prev['EMA21'] and last['EMA9'] > last['EMA21'] and last['RSI'] < 70:
+        send_telegram(f"🟢 BUY SIGNAL! BTC ${price:,.0f}\nEMA9 crossed above EMA21\nRSI: {last['RSI']:.1f} - Uptrend starting!")
+    elif prev['EMA9'] > prev['EMA21'] and last['EMA9'] < last['EMA21'] and last['RSI'] > 30:
+        send_telegram(f"🔴 SELL SIGNAL! BTC ${price:,.0f}\nEMA9 crossed below EMA21\nRSI: {last['RSI']:.1f} - Downtrend starting!")
+    else:
+        trend = "BULLISH 📈" if last['EMA9'] > last['EMA21'] else "BEARISH 📉"
+        send_telegram(f"💓 Heartbeat - BTC ${price:,.0f} | {trend} | RSI {last['RSI']:.0f}")
+
+def loop():
     while True:
         try:
-            df = get_candles()
-            curr, prev = df.iloc[-1], df.iloc[-2]
-            price, rsi = curr['close'], curr['RSI']
-            long_signal = prev['EMA9'] < prev['EMA21'] and curr['EMA9'] > curr['EMA21']
-            short_signal = prev['EMA9'] > prev['EMA21'] and curr['EMA9'] < curr['EMA21']
-            if time.time() - last_heartbeat > 1800:
-                send_telegram(f"💓 Render Alive | BTC ${price:.0f} | RSI {rsi:.0f} | Pos: {position or 'WAITING'}")
-                last_heartbeat = time.time()
-            if position:
-                pnl = (price-entry_price)/entry_price*100 if position=='LONG' else (entry_price-price)/entry_price*100
-                if pnl <= -0.8:
-                    send_telegram(f"🛑 CLOSE {position} SL {pnl:.2f}% at ${price:.0f}")
-                    position = None
-                elif pnl >= 1.2:
-                    send_telegram(f"✅ CLOSE {position} TP +{pnl:.2f}% at ${price:.0f}!")
-                    position = None
-            if not position:
-                if long_signal:
-                    position='LONG'; entry_price=price
-                    send_telegram(f"🟢 BUY LONG ${price:.0f} RSI {rsi:.0f}\nAction: $5 Long 2x | SL {price*0.992:.0f} TP {price*1.012:.0f}")
-                elif short_signal:
-                    position='SHORT'; entry_price=price
-                    send_telegram(f"🔴 SELL SHORT ${price:.0f} RSI {rsi:.0f}\nAction: $5 Short 2x | SL {price*1.008:.0f} TP {price*0.988:.0f}")
-            time.sleep(60)
-        except Exception as e:
-            print(e); time.sleep(30)
+            check_trend()
+        except: pass
+        time.sleep(1800) # 30 mins
+
+threading.Thread(target=loop, daemon=True).start()
+send_telegram("🚀 RENDER 24/7 BOT LIVE! BUY/SELL Alerts ON ✅")
 
 @app.route('/')
 def home():
-    return "Bot is running 24/7"
+    return "Bot is Live with BUY/SELL!"
 
-threading.Thread(target=bot_loop, daemon=True).start()
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=10000)
+    app.run(host="0.0.0.0", port=10000)
