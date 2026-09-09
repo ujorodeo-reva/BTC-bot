@@ -28,15 +28,14 @@ def get_candles(instId):
     return df
 
 def get_all_prices_msg():
-    msg = "💰 LIVE PRICES:\n\n"
+    msg = "⚡ 5M SCALPER LIVE PRICES:\n\n"
     for coin in COINS:
         try:
             df = get_candles(coin)
             last = df.iloc[-1]
-            trend = "📈" if last['EMA9'] > last['EMA21'] else "📉"
+            trend = "BULLISH 📈" if last['EMA9'] > last['EMA21'] else "BEARISH 📉"
             msg += f"{coin.split('-')[0]}: ${last['close']:,.2f} {trend} RSI {last['RSI']:.0f}\n"
         except: pass
-    msg += "\nUse /buy BTC 65000 for TP/SL"
     return msg
 
 def check_all_trends():
@@ -47,14 +46,12 @@ def check_all_trends():
             prev = df.iloc[-2]
             price = last['close']
             name = coin.split('-')[0]
+            # Trend following on 5m
             if prev['EMA9'] < prev['EMA21'] and last['EMA9'] > last['EMA21'] and last['RSI'] < 70:
-                send_telegram(f"🟢 BUY SIGNAL! {name} ${price:,.2f}\nEMA9 crossed above EMA21 | RSI {last['RSI']:.0f}\nSend /buy {name} {price:.0f} for TP/SL")
+                send_telegram(f"🟢 5M BUY SIGNAL! {name} ${price:,.2f}\nTrend: EMA9 > EMA21 (UpTrend)\nRSI: {last['RSI']:.1f}\nScalp Targets: +1% +2%\nSend /buy {name} {price:.0f}")
             elif prev['EMA9'] > prev['EMA21'] and last['EMA9'] < last['EMA21'] and last['RSI'] > 30:
-                send_telegram(f"🔴 SELL SIGNAL! {name} ${price:,.2f}\nEMA9 crossed below EMA21 | RSI {last['RSI']:.0f}")
+                send_telegram(f"🔴 5M SELL SIGNAL! {name} ${price:,.2f}\nTrend: EMA9 < EMA21 (DownTrend)\nRSI: {last['RSI']:.1f}")
         except: pass
-    # Heartbeat summary
-    try: send_telegram(get_all_prices_msg())
-    except: pass
 
 def listen_commands():
     offset = 0
@@ -69,29 +66,26 @@ def listen_commands():
                 low = text.lower()
                 chat_id = str(msg.get('chat', {}).get('id', ''))
                 if chat_id!= TELEGRAM_CHAT_ID: continue
-
-                if '/price' in low or '/trend' in low or '/prices' in low or low == 'price':
+                if '/price' in low or '/prices' in low:
                     send_telegram(get_all_prices_msg())
-
                 elif '/buy' in low:
                     try:
                         parts = text.split()
-                        if len(parts) == 3: # /buy BTC 65000
+                        if len(parts) == 3:
                             coin = parts[1].upper()
                             entry = float(parts[2].replace(',','').replace('$',''))
-                        else: # /buy 65000
+                        else:
                             coin = "BTC"
                             entry = float(parts[1].replace(',','').replace('$',''))
-                        tp1 = entry * 1.02
-                        tp2 = entry * 1.05
-                        tp3 = entry * 1.10
-                        sl = entry * 0.97
-                        send_telegram(f"💰 {coin} TRADE PLAN for ${entry:,.2f}\n\n🟢 Entry: ${entry:,.2f}\n🎯 TP1 (2%): ${tp1:,.2f}\n🎯 TP2 (5%): ${tp2:,.2f}\n🎯 TP3 (10%): ${tp3:,.2f}\n🔴 SL (3%): ${sl:,.2f}\n\nRisk/Reward 1:3.3\nSell 50% at TP1, 30% at TP2, 20% at TP3")
+                        tp1 = entry * 1.01
+                        tp2 = entry * 1.02
+                        tp3 = entry * 1.03
+                        sl = entry * 0.985
+                        send_telegram(f"⚡ {coin} 5M SCALP PLAN ${entry:,.2f}\n\n🟢 Entry: ${entry:,.2f}\n🎯 TP1 (1%): ${tp1:,.2f}\n🎯 TP2 (2%): ${tp2:,.2f}\n🎯 TP3 (3%): ${tp3:,.2f}\n🔴 SL (1.5%): ${sl:,.2f}\n\nFor 5M scalping, take profit FAST!")
                     except:
-                        send_telegram("Use: /buy 65000 OR /buy BTC 65000 OR /buy ETH 3000")
-
+                        send_telegram("Use: /buy BTC 65000")
                 elif '/help' in low:
-                    send_telegram("🤖 MONSTER BOT COMMANDS:\n/price - All 4 coins price\n/buy 65000 - BTC TP/SL\n/buy ETH 3000 - ETH TP/SL\n/buy SOL 150 - SOL TP/SL\n/help - Menu\n\nBot watches: BTC, ETH, SOL, BNB 24/7")
+                    send_telegram("⚡ 5M SCALPER BOT:\n/price - 4 coins trend (5m)\n/buy BTC 65000 - Scalp TP/SL (1%,2%,3%)\nWatching: BTC, ETH, SOL, BNB on 5M timeframe 24/7")
         except: time.sleep(0.5)
         time.sleep(1)
 
@@ -99,15 +93,15 @@ def loop():
     while True:
         try: check_all_trends()
         except: pass
-        time.sleep(1800)
+        time.sleep(300) # Check every 5 minutes = matches timeframe!
 
 threading.Thread(target=loop, daemon=True).start()
 threading.Thread(target=listen_commands, daemon=True).start()
-send_telegram("👹 MONSTER BOT LIVE! Watching BTC, ETH, SOL, BNB 24/7\nTry /price and /buy ETH 3000 ✅")
+send_telegram("⚡ 5M SCALPER MONSTER LIVE! Watching BTC,ETH,SOL,BNB on 5M timeframe - Trend Following Trades ACTIVE!")
 
 @app.route('/')
 def home():
-    return "Monster Bot Live - 4 Coins!"
+    return "5M Scalper Monster Live!"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
