@@ -4,26 +4,27 @@ from flask import Flask
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN","").strip()
 CHAT_ID = os.environ.get("CHAT_ID","").strip()
-print(f"BOT_TOKEN ok? {bool(BOT_TOKEN)}")
 
 app = Flask(__name__)
 @app.route('/')
 def home():
-    return "5M Trader Bot LIVE"
+    return "4-Coin 5M Trader LIVE"
 
 bot = telebot.TeleBot(BOT_TOKEN) if BOT_TOKEN else None
 
-# --- Trading State ---
-current_trade = None # {"entry_price": 0, "type": "BUY"}
+# --- CONFIG: Your 4 coins ---
+COINS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
+# You can change to any: e.g. ["BTCUSDT", "PEPEUSDT", "DOGEUSDT", "XRPUSDT"]
 
-def get_klines():
+trades = {coin: None for coin in COINS} # Track each coin
+
+def get_klines(symbol):
     try:
-        url = "https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=5m&limit=50"
+        url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=5m&limit=50"
         data = requests.get(url, timeout=10).json()
         closes = [float(c[4]) for c in data]
         return closes
-    except Exception as e:
-        print(f"kline error {e}")
+    except:
         return None
 
 def ema(data, period):
@@ -34,86 +35,76 @@ def ema(data, period):
         ema_val = price * k + ema_val * (1 - k)
     return ema_val
 
-def get_price():
+def get_price(symbol):
     try:
-        r = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5).json()
+        r = requests.get(f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}", timeout=5).json()
         return float(r['price'])
     except:
         return None
 
 def send(msg):
     if bot and CHAT_ID:
-        try:
-            bot.send_message(CHAT_ID, msg)
-            print(f"Sent: {msg[:50]}")
-        except Exception as e:
-            print(f"Send error {e}")
+        try: bot.send_message(CHAT_ID, msg, parse_mode="Markdown")
+        except Exception as e: print(f"Send error {e}")
+
+def analyze_coin(symbol):
+    global trades
+    closes = get_klines(symbol)
+    price = get_price(symbol)
+    if not closes or not price: return
+
+    ema9 = ema(closes, 9)
+    ema21 = ema(closes, 21)
+    coin_name = symbol.replace("USDT","")
+
+    # No open trade - Look for ENTRY
+    if trades[symbol] is None:
+        if ema9 and ema21 and ema9 > ema21 and price > ema9 and closes[-1] > closes[-2]:
+            trades[symbol] = {"entry": price}
+            tp = price * 1.015
+            sl = price * 0.992
+            send(f"🚀 **ENTER BUY {coin_name} NOW**\n\nEntry: ${price:,.4f}\n5m Trend: UP (EMA9 > EMA21)\n\n🎯 TP: ${tp:,.4f} (+1.5%)\n🛑 SL: ${sl:,.4f} (-0.8%)")
+    else:
+        # Have trade - Watch TP/SL
+        entry = trades[symbol]["entry"]
+        if price >= entry * 1.015:
+            pnl = ((price-entry)/entry*100)
+            send(f"✅ **TAKE PROFIT {coin_name}!**\n\nEntry: ${entry:,.4f}\nExit: ${price:,.4f}\nProfit: +{pnl:.2f}%")
+            trades[symbol] = None
+        elif price <= entry * 0.992:
+            pnl = ((price-entry)/entry*100)
+            send(f"🚨 **CUT LOSS {coin_name}!**\n\nEntry: ${entry:,.4f}\nExit: ${price:,.4f}\nLoss: {pnl:.2f}%")
+            trades[symbol] = None
 
 def trading_loop():
-    global current_trade
-    print("5M Trader loop started")
+    print(f"Watching {COINS}")
     while True:
-        try:
-            closes = get_klines()
-            price = get_price()
-            if not closes or not price:
-                time.sleep(10)
-                continue
+        for coin in COINS:
+            try:
+                analyze_coin(coin)
+                time.sleep(2) # small delay between coins
+            except Exception as e:
+                print(f"{coin} error {e}")
+        time.sleep(30) # scan all 4 coins every 30 sec
 
-            ema9 = ema(closes, 9)
-            ema21 = ema(closes, 21)
-            prev_close = closes[-2]
-
-            print(f"Price: {price} | EMA9: {ema9:.2f} EMA21: {ema21:.2f}")
-
-            # --- NO OPEN TRADE: Look for ENTRY ---
-            if current_trade is None:
-                # BUY condition: EMA9 > EMA21 and price is trending up on 5m
-                if ema9 and ema21 and ema9 > ema21 and price > ema9 and closes[-1] > prev_close:
-                    current_trade = {"entry_price": price, "type": "BUY"}
-                    tp = price * 1.015
-                    sl = price * 0.992
-                    send(f"🚀 **ENTER BUY NOW**\n\nEntry: ${price:,.2f}\n5m Trend: UP (EMA9 > EMA21)\n\n🎯 Take Profit: ${tp:,.2f} (+1.5%)\n🛑 Stop Loss: ${sl:,.2f} (-0.8%)\n\nI will watch price for you!")
-
-            # --- HAVE OPEN TRADE: Watch for TP/SL ---
-            else:
-                entry = current_trade["entry_price"]
-                pnl_percent = ((price - entry) / entry) * 100
-
-                # Take Profit +1.5%
-                if price >= entry * 1.015:
-                    send(f"✅ **TAKE PROFIT NOW!**\n\nEntry: ${entry:,.2f}\nExit: ${price:,.2f}\nProfit: +{pnl_percent:.2f}%\n\nClose trade!")
-                    current_trade = None
-
-                # Cut Loss -0.8%
-                elif price <= entry * 0.992:
-                    send(f"🚨 **CUT LOSS NOW!**\n\nEntry: ${entry:,.2f}\nExit: ${price:,.2f}\nLoss: {pnl_percent:.2f}%\n\nClose to avoid bigger loss!")
-                    current_trade = None
-
-                # Update every 3% move
-                elif abs(pnl_percent) > 0.5:
-                    print(f"Holding: {pnl_percent:.2f}%")
-
-            time.sleep(30) # check every 30 seconds
-
-        except Exception as e:
-            print(f"Loop error {e}")
-            time.sleep(10)
-
-# Start bot
 if BOT_TOKEN:
     threading.Thread(target=trading_loop, daemon=True).start()
     threading.Thread(target=lambda: bot.infinity_polling(), daemon=True).start()
 
 @bot.message_handler(commands=['start','status'])
 def handle_start(m):
-    if current_trade:
-        entry = current_trade["entry_price"]
-        price = get_price()
-        pnl = ((price-entry)/entry*100) if price else 0
-        bot.reply_to(m, f"📊 Open Trade:\nEntry: ${entry:,.2f}\nNow: ${price:,.2f}\nPnL: {pnl:.2f}%")
-    else:
-        bot.reply_to(m, "👋 5M Trader Bot Ready!\n\nI scan BTC 5-min chart.\nI will alert you: ENTER, TAKE PROFIT, CUT LOSS.\n\nWaiting for uptrend...")
+    msg = "👋 **4-Coin 5M Trader Ready**\n\n"
+    for coin in COINS:
+        name = coin.replace("USDT","")
+        if trades[coin]:
+            entry = trades[coin]["entry"]
+            price = get_price(coin)
+            pnl = ((price-entry)/entry*100) if price else 0
+            msg += f"📊 {name}: IN TRADE {pnl:.2f}%\n"
+        else:
+            msg += f"⏳ {name}: Waiting for uptrend\n"
+    msg += f"\nScanning every 30s."
+    bot.reply_to(m, msg, parse_mode="Markdown")
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
