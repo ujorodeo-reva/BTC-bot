@@ -13,7 +13,7 @@ def send_telegram(msg):
     except: pass
 
 def get_candles(instId):
-    url = f"https://www.okx.com/api/v5/market/candles?instId={instId}&bar=15m&limit=100"
+    url = f"https://www.okx.com/api/v5/market/candles?instId={instId}&bar=5m&limit=100"
     r = requests.get(url, timeout=10).json()
     data = r['data'][::-1]
     df = pd.DataFrame(data, columns=['time','open','high','low','close','vol','volCcy','volCcyQuote','confirm'])
