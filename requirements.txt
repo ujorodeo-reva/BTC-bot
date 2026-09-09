@@ -1,6 +1,3 @@
-flask
-requests
-pandas
-gunicorn
-yfinance
+Flask
 pyTelegramBotAPI
+requests
