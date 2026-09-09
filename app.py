@@ -51,7 +51,7 @@ def listen_commands():
     while True:
         try:
             url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?offset={offset}&timeout=20"
-            r = requests.get(url, timeout=25).json()
+            r = requests.get(url, timeout=10).json()
             for update in r.get('result', []):
                 offset = update['update_id'] + 1
                 msg = update.get('message', {})
@@ -60,8 +60,8 @@ def listen_commands():
                 if chat_id != TELEGRAM_CHAT_ID: continue
                 if '/price' in text or '/trend' in text or 'price' in text or 'trend' in text:
                     send_telegram(get_price_msg())
-        except: time.sleep(2)
-        time.sleep(2)
+        except: time.sleep(0.5)
+        time.sleep(1)
 
 def loop():
     while True:
