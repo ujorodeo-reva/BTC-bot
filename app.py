@@ -25,34 +25,57 @@ def get_candles():
     df['RSI'] = 100 - (100/(1+rs))
     return df
 
+def get_price_msg():
+    df = get_candles()
+    last = df.iloc[-1]
+    price = last['close']
+    trend = "BULLISH 📈" if last['EMA9'] > last['EMA21'] else "BEARISH 📉"
+    return f"₿ BTC Price: ${price:,.2f}\nTrend: {trend}\nEMA9: ${last['EMA9']:,.0f} | EMA21: ${last['EMA21']:,.0f}\nRSI: {last['RSI']:.1f}"
+
 def check_trend():
     df = get_candles()
     last = df.iloc[-1]
     prev = df.iloc[-2]
     price = last['close']
-    
-    # BUY/SELL Logic
     if prev['EMA9'] < prev['EMA21'] and last['EMA9'] > last['EMA21'] and last['RSI'] < 70:
-        send_telegram(f"🟢 BUY SIGNAL! BTC ${price:,.0f}\nEMA9 crossed above EMA21\nRSI: {last['RSI']:.1f} - Uptrend starting!")
+        send_telegram(f"🟢 BUY SIGNAL! BTC ${price:,.0f}\nEMA9 crossed above EMA21\nRSI: {last['RSI']:.1f}")
     elif prev['EMA9'] > prev['EMA21'] and last['EMA9'] < last['EMA21'] and last['RSI'] > 30:
-        send_telegram(f"🔴 SELL SIGNAL! BTC ${price:,.0f}\nEMA9 crossed below EMA21\nRSI: {last['RSI']:.1f} - Downtrend starting!")
+        send_telegram(f"🔴 SELL SIGNAL! BTC ${price:,.0f}\nEMA9 crossed below EMA21\nRSI: {last['RSI']:.1f}")
     else:
         trend = "BULLISH 📈" if last['EMA9'] > last['EMA21'] else "BEARISH 📉"
         send_telegram(f"💓 Heartbeat - BTC ${price:,.0f} | {trend} | RSI {last['RSI']:.0f}")
 
-def loop():
+# LISTEN FOR /price and /trend COMMANDS
+def listen_commands():
+    offset = 0
     while True:
         try:
-            check_trend()
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?offset={offset}&timeout=20"
+            r = requests.get(url, timeout=25).json()
+            for update in r.get('result', []):
+                offset = update['update_id'] + 1
+                msg = update.get('message', {})
+                text = msg.get('text', '').lower()
+                chat_id = str(msg.get('chat', {}).get('id', ''))
+                if chat_id != TELEGRAM_CHAT_ID: continue
+                if '/price' in text or '/trend' in text or 'price' in text or 'trend' in text:
+                    send_telegram(get_price_msg())
+        except: time.sleep(2)
+        time.sleep(2)
+
+def loop():
+    while True:
+        try: check_trend()
         except: pass
-        time.sleep(1800) # 30 mins
+        time.sleep(1800)
 
 threading.Thread(target=loop, daemon=True).start()
-send_telegram("🚀 RENDER 24/7 BOT LIVE! BUY/SELL Alerts ON ✅")
+threading.Thread(target=listen_commands, daemon=True).start()
+send_telegram("🚀 BOT UPGRADED! Now send /price or /trend and I will reply instantly ✅")
 
 @app.route('/')
 def home():
-    return "Bot is Live with BUY/SELL!"
+    return "Bot Live with Commands!"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
