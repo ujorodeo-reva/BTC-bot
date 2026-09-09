@@ -38,28 +38,45 @@ def check_trend():
     prev = df.iloc[-2]
     price = last['close']
     if prev['EMA9'] < prev['EMA21'] and last['EMA9'] > last['EMA21'] and last['RSI'] < 70:
-        send_telegram(f"🟢 BUY SIGNAL! BTC ${price:,.0f}\nEMA9 crossed above EMA21\nRSI: {last['RSI']:.1f}")
+        send_telegram(f"🟢 BUY SIGNAL! BTC ${price:,.0f}\nEMA9 crossed above EMA21\nRSI: {last['RSI']:.1f}\nTip: Send /buy {price:,.0f} for TP/SL")
     elif prev['EMA9'] > prev['EMA21'] and last['EMA9'] < last['EMA21'] and last['RSI'] > 30:
         send_telegram(f"🔴 SELL SIGNAL! BTC ${price:,.0f}\nEMA9 crossed below EMA21\nRSI: {last['RSI']:.1f}")
     else:
         trend = "BULLISH 📈" if last['EMA9'] > last['EMA21'] else "BEARISH 📉"
         send_telegram(f"💓 Heartbeat - BTC ${price:,.0f} | {trend} | RSI {last['RSI']:.0f}")
 
-# LISTEN FOR /price and /trend COMMANDS
 def listen_commands():
     offset = 0
     while True:
         try:
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?offset={offset}&timeout=20"
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates?offset={offset}&timeout=5"
             r = requests.get(url, timeout=10).json()
             for update in r.get('result', []):
                 offset = update['update_id'] + 1
                 msg = update.get('message', {})
                 text = msg.get('text', '').lower()
                 chat_id = str(msg.get('chat', {}).get('id', ''))
-                if chat_id != TELEGRAM_CHAT_ID: continue
-                if '/price' in text or '/trend' in text or 'price' in text or 'trend' in text:
+                if chat_id!= TELEGRAM_CHAT_ID: continue
+
+                # /price /trend
+                if '/price' in text or '/trend' in text or text.strip() == 'price' or text.strip() == 'trend':
                     send_telegram(get_price_msg())
+
+                # /buy PRICE -> TP/SL CALCULATOR
+                elif '/buy' in text:
+                    try:
+                        parts = text.split()
+                        entry = float(parts[1].replace(',', '').replace('$',''))
+                        tp1 = entry * 1.02
+                        tp2 = entry * 1.05
+                        tp3 = entry * 1.10
+                        sl = entry * 0.97
+                        send_telegram(f"💰 TRADE PLAN for ${entry:,.2f}\n\n🟢 Entry: ${entry:,.2f}\n🎯 TP1 (2%): ${tp1:,.2f}\n🎯 TP2 (5%): ${tp2:,.2f}\n🎯 TP3 (10%): ${tp3:,.2f}\n🔴 Stop Loss (3%): ${sl:,.2f}\n\nRisk/Reward: 1:3.3\nStrategy: Sell 50% at TP1, 30% at TP2, 20% at TP3")
+                    except:
+                        send_telegram("Use like: /buy 65000 or /buy 114500")
+
+                elif '/help' in text:
+                    send_telegram("🤖 COMMANDS:\n/price - Current BTC price & trend\n/trend - Same as price\n/buy 65000 - TP/SL calculator\n/help - This menu")
         except: time.sleep(0.5)
         time.sleep(1)
 
@@ -71,11 +88,11 @@ def loop():
 
 threading.Thread(target=loop, daemon=True).start()
 threading.Thread(target=listen_commands, daemon=True).start()
-send_telegram("🚀 BOT UPGRADED! Now send /price or /trend and I will reply instantly ✅")
+send_telegram("🚀 ELITE BOT LIVE! Try:\n/price - Price\n/buy 65000 - TP/SL Calculator\n/help - Menu ✅")
 
 @app.route('/')
 def home():
-    return "Bot Live with Commands!"
+    return "Elite Bot Live!"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
