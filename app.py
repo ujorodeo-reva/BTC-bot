@@ -1,14 +1,19 @@
+import os, time, threading
 import yfinance as yf
-import time
 import telebot
+from flask import Flask
 
-TOKEN = "7586608380:AAGmYdMJ2Uk30MShVRjh8sp0DtpPguaOB2Q"
-CHAT_ID = "7484911407"
+TOKEN = os.getenv("BOT_TOKEN") or "7586608380:AAGmYdMJ2Uk30MShVRjh8sp0DtpPguaOB2Q"
+CHAT_ID = os.getenv("CHAT_ID") or "7484911407"
 bot = telebot.TeleBot(TOKEN)
+app = Flask(__name__)
 
-# This is the memory - bot will remember if trade open
 open_trade = None
 entry = 0
+
+@app.route('/')
+def home():
+    return f"Bot is running! Trade: {open_trade} Entry: {entry}"
 
 def get_data():
     data = yf.download("BTC-USD", period="2d", interval="5m", progress=False)
@@ -21,59 +26,54 @@ def get_data():
     data['RSI'] = 100 - (100 / (1 + rs))
     return data
 
-print("Bot started...")
+def trading_loop():
+    global open_trade, entry
+    print("Trading loop started")
+    while True:
+        try:
+            data = get_data()
+            last = data.iloc[-1]
+            price = float(last['Close'])
+            ema9 = float(last['EMA9'])
+            ema21 = float(last['EMA21'])
+            rsi = float(last['RSI'])
 
-while True:
-    try:
-        data = get_data()
-        last = data.iloc[-1]
-        price = float(last['Close'])
-        ema9 = float(last['EMA9'])
-        ema21 = float(last['EMA21'])
-        rsi = float(last['RSI'])
+            # HOLD LOGIC
+            if open_trade is not None:
+                print(f"Holding {open_trade} Entry {entry} Now {price}")
+                if open_trade == "BUY":
+                    if ema9 < ema21:
+                        bot.send_message(CHAT_ID, f"⚠️ CANCEL BUY! Trend flipped. Entry ${entry:.2f} -> Now ${price:.2f}")
+                        open_trade = None
+                    elif price >= entry * 1.03:
+                        bot.send_message(CHAT_ID, f"✅ TP3 +3% DONE! 💰 BTC ${price:.2f}")
+                        open_trade = None
+                    elif price <= entry * 0.985:
+                        bot.send_message(CHAT_ID, f"❌ SL -1.5% Hit. Closed.")
+                        open_trade = None
+                elif open_trade == "SELL":
+                    if ema9 > ema21:
+                        bot.send_message(CHAT_ID, f"⚠️ CANCEL SELL! Trend flipped.")
+                        open_trade = None
+                continue
 
-        # ---- IF WE ALREADY HAVE A TRADE ----
-        if open_trade is not None:
-            print(f"Holding {open_trade} | Entry {entry} | Now {price}")
-            
-            # Check if BUY still valid
-            if open_trade == "BUY":
-                if ema9 < ema21: # Trend changed
-                    bot.send_message(CHAT_ID, f"⚠️ CANCEL BUY! Trend reversed. Was ${entry:.2f} now ${price:.2f}. Looking for new trade.")
-                    open_trade = None
-                elif price >= entry * 1.03:
-                    bot.send_message(CHAT_ID, f"✅ TP3 DONE! +3%! Trade finished. Profit secured! 💰")
-                    open_trade = None
-                elif price <= entry * 0.985:
-                    bot.send_message(CHAT_ID, f"❌ SL Hit -1.5%. Closed. Next hunt...")
-                    open_trade = None
-                else:
-                    # Check TP1 TP2 for info only
-                    if price >= entry * 1.01 and price < entry * 1.015:
-                        bot.send_message(CHAT_ID, f"🎯 TP1 +1% hit! Sell 50% now! ${price:.2f}")
-
-            # Check if SELL still valid
-            if open_trade == "SELL":
-                if ema9 > ema21:
-                    bot.send_message(CHAT_ID, f"⚠️ CANCEL SELL! Trend reversed. Looking for new.")
-                    open_trade = None
-                elif price <= entry * 0.97:
-                    bot.send_message(CHAT_ID, f"✅ SELL TP3 DONE! +3%! 💰")
-                    open_trade = None
-
-        # ---- IF NO TRADE, FIND NEW ONE ----
-        else:
-            if ema9 > ema21 and rsi > 40 and rsi < 68:
+            # NEW SIGNAL (only if no open trade)
+            if ema9 > ema21 and 40 < rsi < 68:
                 entry = price
                 open_trade = "BUY"
-                bot.send_message(CHAT_ID, f"🟢 5M BUY! BTC ${price:.2f}\nRSI {rsi:.1f}\nTP1 {price*1.01:.2f} | TP2 {price*1.02:.2f} | TP3 {price*1.03:.2f}\nSL {price*0.985:.2f}\n\nI will HOLD this till done. No new signal until this closes or cancels.")
-            
-            elif ema9 < ema21 and rsi < 60 and rsi > 32:
+                bot.send_message(CHAT_ID, f"🟢 5M BUY! ${price:.2f} RSI {rsi:.1f}\nTP1 {price*1.01:.2f} TP2 {price*1.02:.2f} TP3 {price*1.03:.2f} SL {price*0.985:.2f}\nHolding till TP/SL or Cancel")
+            elif ema9 < ema21 and 32 < rsi < 60:
                 entry = price
                 open_trade = "SELL"
-                bot.send_message(CHAT_ID, f"🔴 5M SELL! BTC ${price:.2f}\nRSI {rsi:.1f}\n\nI will HOLD this till done.")
+                bot.send_message(CHAT_ID, f"🔴 5M SELL! ${price:.2f} RSI {rsi:.1f}\nHolding till done")
 
-    except Exception as e:
-        print(f"Error: {e}")
+        except Exception as e:
+            print(f"Error: {e}")
+        time.sleep(60)
 
-    time.sleep(60)
+# Start trading in background
+threading.Thread(target=trading_loop, daemon=True).start()
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
