@@ -18,10 +18,16 @@ trades = {coin: None for coin in COINS}
 def get_klines(symbol):
     try:
         url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=5m&limit=250"
-        data = requests.get(url, timeout=10).json()
-        closes = [float(c[4]) for c in data]
-        return closes
-    except:
+        r = requests.get(url, timeout=15)
+        data = r.json()
+        if isinstance(data, list):
+            closes = [float(c[4]) for c in data]
+            return closes
+        else:
+            print(f"Klines error {symbol}: {data}")
+            return None
+    except Exception as e:
+        print(f"Klines exception {symbol}: {e}")
         return None
 
 def ema(data, period):
@@ -48,7 +54,7 @@ def rsi(data, period=14):
 
 def get_price(symbol):
     try:
-        r = requests.get(f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}", timeout=5).json()
+        r = requests.get(f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}", timeout=10).json()
         return float(r['price'])
     except:
         return None
@@ -63,41 +69,30 @@ def analyze_coin(symbol):
     price = get_price(symbol)
     if not closes or not price or len(closes) < 200: return
 
-    # CURRENT EMAs
     ema9 = ema(closes, 9)
     ema21 = ema(closes, 21)
     ema200 = ema(closes, 200)
-
-    # PREVIOUS EMAs for CROSS detection (using data without last candle)
     ema9_prev = ema(closes[:-1], 9)
     ema21_prev = ema(closes[:-1], 21)
-
     rsi_val = rsi(closes, 14)
     coin_name = symbol.replace("USDT","")
 
     if not all([ema9, ema21, ema200, ema9_prev, ema21_prev, rsi_val]): return
 
-    # CROSS LOGIC
     bullish_cross = ema9_prev <= ema21_prev and ema9 > ema21
     bearish_cross = ema9_prev >= ema21_prev and ema9 < ema21
 
-    # --- ENTRY LOGIC ---
     if trades[symbol] is None:
-        # LONG CONDITIONS: Price > EMA200 + Bullish Cross + RSI confirmation + Momentum
         if price > ema200 and bullish_cross and rsi_val > 50 and rsi_val < 70 and closes[-1] > closes[-2]:
             trades[symbol] = {"entry": price, "side": "LONG"}
-            tp = price * 1.02 # 2% TP for higher quality trades
-            sl = price * 0.99 # 1% SL
-            send(f"🚀 **HIGH CONFIDENCE LONG {coin_name}** 📈\n\nPrice: ${price:,.4f}\n✅ Price > EMA200 ({ema200:,.2f})\n✅ EMA9 CROSS UP EMA21\n✅ RSI: {rsi_val:.1f} (Bullish)\n✅ 5m Momentum UP\n\n🎯 TP: ${tp:,.4f} (+2%)\n🛑 SL: ${sl:,.4f} (-1%)")
-
-        # SHORT CONDITIONS: Price < EMA200 + Bearish Cross + RSI confirmation + Momentum
+            tp = price * 1.02
+            sl = price * 0.99
+            send(f"🚀 **HIGH CONFIDENCE LONG {coin_name}** 📈\n\nPrice: ${price:,.4f}\n✅ Price > EMA200 ({ema200:,.2f})\n✅ EMA9 CROSS UP EMA21\n✅ RSI: {rsi_val:.1f}\n\n🎯 TP: ${tp:,.4f} (+2%)\n🛑 SL: ${sl:,.4f} (-1%)")
         elif price < ema200 and bearish_cross and rsi_val < 50 and rsi_val > 30 and closes[-1] < closes[-2]:
             trades[symbol] = {"entry": price, "side": "SHORT"}
             tp = price * 0.98
             sl = price * 1.01
-            send(f"🔻 **HIGH CONFIDENCE SHORT {coin_name}** 📉\n\nPrice: ${price:,.4f}\n✅ Price < EMA200 ({ema200:,.2f})\n✅ EMA9 CROSS DOWN EMA21\n✅ RSI: {rsi_val:.1f} (Bearish)\n✅ 5m Momentum DOWN\n\n🎯 TP: ${tp:,.4f} (-2%)\n🛑 SL: ${sl:,.4f} (+1%)")
-
-    # --- EXIT LOGIC ---
+            send(f"🔻 **HIGH CONFIDENCE SHORT {coin_name}** 📉\n\nPrice: ${price:,.4f}\n✅ Price < EMA200 ({ema200:,.2f})\n✅ EMA9 CROSS DOWN EMA21\n✅ RSI: {rsi_val:.1f}\n\n🎯 TP: ${tp:,.4f} (-2%)\n🛑 SL: ${sl:,.4f} (+1%)")
     else:
         entry = trades[symbol]["entry"]
         side = trades[symbol]["side"]
@@ -110,7 +105,7 @@ def analyze_coin(symbol):
                 pnl = ((price-entry)/entry*100)
                 send(f"🚨 **SL HIT LONG {coin_name}! {pnl:.2f}%**\nEntry: ${entry:,.4f} -> Exit: ${price:,.4f}")
                 trades[symbol] = None
-        else: # SHORT
+        else:
             if price <= entry * 0.98:
                 pnl = ((entry-price)/entry*100)
                 send(f"✅ **TP HIT SHORT {coin_name}! +{pnl:.2f}%**\nEntry: ${entry:,.4f} -> Exit: ${price:,.4f}")
@@ -129,7 +124,7 @@ def trading_loop():
                 time.sleep(3)
             except Exception as e:
                 print(f"{coin} error {e}")
-        time.sleep(60) # Check every 1 min for high quality setups
+        time.sleep(60)
 
 if BOT_TOKEN:
     threading.Thread(target=trading_loop, daemon=True).start()
@@ -142,7 +137,7 @@ def handle_start(m):
         name = coin.replace("USDT","")
         closes = get_klines(coin)
         price = get_price(coin)
-        if closes and price:
+        if closes and price and len(closes) >= 200:
             e200 = ema(closes, 200)
             r = rsi(closes, 14)
             trend = "Above 200" if price > e200 else "Below 200"
@@ -152,6 +147,8 @@ def handle_start(m):
                 side = trades[coin]["side"]
                 pnl = ((price-entry)/entry*100) if side=="LONG" else ((entry-price)/entry*100)
                 msg += f" 📊 IN {side} {pnl:.2f}%\n"
+        elif price:
+            msg += f"• {name}: ${price:,.2f} | loading EMA...\n"
         else:
             msg += f"• {name}: loading...\n"
     bot.reply_to(m, msg, parse_mode="Markdown")
@@ -160,13 +157,21 @@ def handle_start(m):
 def handle_price(m):
     txt = "💰 **Live Prices + EMA200**\n\n"
     for coin in COINS:
-        closes = get_klines(coin)
-        p = get_price(coin)
-        name = coin.replace("USDT","")
-        if closes and p:
-            e200 = ema(closes, 200)
-            r = rsi(closes, 14)
-            txt += f"{name}: ${p:,.2f}\nEMA200: ${e200:,.2f}\nRSI: {r:.1f}\n\n"
+        try:
+            p = get_price(coin)
+            closes = get_klines(coin)
+            name = coin.replace("USDT","")
+            if p:
+                txt += f"{name}: ${p:,.2f}\n"
+            if closes and len(closes) >= 200:
+                e200 = ema(closes, 200)
+                r = rsi(closes, 14)
+                txt += f"EMA200: ${e200:,.2f} | RSI: {r:.0f}\n\n"
+            else:
+                count = len(closes) if closes else 0
+                txt += f"(loading EMA... {count} candles)\n\n"
+        except Exception as e:
+            txt += f"{coin}: error {e}\n\n"
     bot.reply_to(m, txt, parse_mode="Markdown")
 
 if __name__ == "__main__":
