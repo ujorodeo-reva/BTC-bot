@@ -15,12 +15,15 @@ bot = telebot.TeleBot(BOT_TOKEN) if BOT_TOKEN else None
 COINS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"]
 trades = {coin: None for coin in COINS}
 
+# USE UNBLOCKED BINANCE DOMAIN
+BASE_URL = "https://data-api.binance.vision"
+
 def get_klines(symbol):
     try:
-        url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=5m&limit=250"
+        url = f"{BASE_URL}/api/v3/klines?symbol={symbol}&interval=5m&limit=250"
         r = requests.get(url, timeout=15)
         data = r.json()
-        if isinstance(data, list):
+        if isinstance(data, list) and len(data) > 0:
             closes = [float(c[4]) for c in data]
             return closes
         else:
@@ -54,7 +57,8 @@ def rsi(data, period=14):
 
 def get_price(symbol):
     try:
-        r = requests.get(f"https://api.binance.com/api/v3/ticker/price?symbol={symbol}", timeout=10).json()
+        url = f"{BASE_URL}/api/v3/ticker/price?symbol={symbol}"
+        r = requests.get(url, timeout=10).json()
         return float(r['price'])
     except:
         return None
@@ -169,7 +173,7 @@ def handle_price(m):
                 txt += f"EMA200: ${e200:,.2f} | RSI: {r:.0f}\n\n"
             else:
                 count = len(closes) if closes else 0
-                txt += f"(loading EMA... {count} candles)\n\n"
+                txt += f"(loading EMA... {count} candles - if 0, API blocked)\n\n"
         except Exception as e:
             txt += f"{coin}: error {e}\n\n"
     bot.reply_to(m, txt, parse_mode="Markdown")
